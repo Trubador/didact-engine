@@ -61,12 +61,13 @@ namespace DidactEngine.Controllers
         /// </summary>
         /// <returns></returns>
         [HttpPost("/flows")]
-        [SwaggerResponse(StatusCodes.Status202Accepted)]
-        public async Task<IActionResult> CreateFlowAsync()
+        [SwaggerResponse(StatusCodes.Status202Accepted)]        public async Task<IActionResult> CreateFlowAsync()
         {
             SomeFlow someFlow = new SomeFlow(_flowLogger, _flowConfigurator, _didactDependencyInjector);
-            await _flowRepository.SaveConfigurationsAsync(_flowConfigurator);
-
+            
+            // Configure the flow first - this populates the _flowConfigurator with actual values
+            await someFlow.ConfigureAsync();
+            
             return Accepted();
 
             // await someFlow.ExecuteAsync("json test string running inside action task block in a flow run");

@@ -6,29 +6,26 @@ namespace DidactEngine.TaskSchedulers
     {
         private readonly ILogger<DidactThreadPoolScheduler> _logger;
 
-        private readonly ThreadLocal<bool> _currentThreadIsExecuting = new(false);
-
-        private readonly ThreadLocal<string> _currentThreadName = new();
-
-        private readonly int _maxDegreeOfParallelism;
+        private readonly ThreadLocal<bool> _currentThreadIsExecuting = new(false);        private readonly ThreadLocal<string> _currentThreadName = new();
 
         private readonly Thread[] _threads;
 
         private readonly ConcurrentQueue<Task> _tasks;
 
-        public DidactThreadPoolScheduler(ILogger<DidactThreadPoolScheduler> logger, int maxDegreeOfParallelism)
+        private readonly AutoResetEvent _workAvailable = new(false);
+
+        private volatile bool _shutdown = false;        public DidactThreadPoolScheduler(ILogger<DidactThreadPoolScheduler> logger, int maxDegreeOfParallelism)
         {
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-            _maxDegreeOfParallelism = maxDegreeOfParallelism <= 0
-                ? throw new ArgumentOutOfRangeException(nameof(maxDegreeOfParallelism))
-                : maxDegreeOfParallelism;
+            if (maxDegreeOfParallelism <= 0)
+                throw new ArgumentOutOfRangeException(nameof(maxDegreeOfParallelism));
 
             _tasks = new ConcurrentQueue<Task>();
             _threads = new Thread[maxDegreeOfParallelism];
 
             // Configure each thread
-            for (int i = 0; i < _maxDegreeOfParallelism; i++)
+            for (int i = 0; i < maxDegreeOfParallelism; i++)
             {
                 _threads[i] = new Thread(() => ThreadExecutionLoop())
                 {
@@ -41,14 +38,12 @@ namespace DidactEngine.TaskSchedulers
 
             // Start each thread
             _threads.ToList().ForEach(t => t.Start());
-        }
-
-        private void ThreadExecutionLoop()
+        }        private void ThreadExecutionLoop()
         {
             _currentThreadIsExecuting.Value = true;
             _currentThreadName.Value = Thread.CurrentThread.Name!;
 
-            while (true)
+            while (!_shutdown)
             {
                 try
                 {
@@ -57,23 +52,28 @@ namespace DidactEngine.TaskSchedulers
                     {
                         TryExecuteTask(task!);
                     }
-                }
-                catch (ThreadInterruptedException ex)
+                    else
+                    {
+                        // No tasks available - wait for signal that work is available
+                        // This blocks the thread instead of busy-waiting, dramatically reducing CPU usage
+                        _workAvailable.WaitOne(1000); // Wait up to 1 second for work
+                    }
+                }                catch (ThreadInterruptedException ex)
                 {
-                    _logger.LogCritical("A {exName} occurred on thread {threadName}. See inner exception: {ex}", nameof(ThreadInterruptedException), _currentThreadName, ex);
-                    throw;
+                    _logger.LogCritical(ex, "A {ExceptionName} occurred on thread {ThreadName}", nameof(ThreadInterruptedException), _currentThreadName.Value);
+                    break; // Exit loop on thread interruption
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogCritical("An unhandled exception occurred on thread {threadName}. See inner exception: {ex}", _currentThreadName, ex);
-                    throw;
+                    _logger.LogCritical(ex, "An unhandled exception occurred on thread {ThreadName}", _currentThreadName.Value);
+                    // Continue execution for other exceptions
                 }
             }
-        }
-
-        protected sealed override void QueueTask(Task task)
+        }        protected sealed override void QueueTask(Task task)
         {
             _tasks.Enqueue(task);
+            // Signal that work is available to wake up waiting threads
+            _workAvailable.Set();
         }
 
         protected sealed override bool TryExecuteTaskInline(Task task, bool taskWasPreviouslyQueued)
@@ -99,6 +99,27 @@ namespace DidactEngine.TaskSchedulers
         protected sealed override IEnumerable<Task> GetScheduledTasks()
         {
             return _tasks.ToArray();
+        }
+
+        // Add proper disposal to shutdown threads gracefully
+        public void Shutdown()
+        {
+            _shutdown = true;
+            _workAvailable.Set(); // Wake up all waiting threads so they can exit
+
+            // Wait for all threads to complete
+            foreach (var thread in _threads)
+            {
+                if (thread.IsAlive)
+                {
+                    thread.Join(5000); // Wait up to 5 seconds for each thread
+                }
+            }
+
+            _workAvailable.Dispose();
+        }        ~DidactThreadPoolScheduler()
+        {
+            Shutdown();
         }
     }
 }

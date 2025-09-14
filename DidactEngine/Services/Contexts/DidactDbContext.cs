@@ -36,6 +36,8 @@ namespace DidactEngine.Services.Contexts
 
         public virtual DbSet<Engine> Engines { get; set; } = null!;
 
+        public virtual DbSet<ExecutionMode> ExecutionModes { get; set; } = null!;
+
         protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
         {
             if (!optionsBuilder.IsConfigured)
@@ -45,36 +47,36 @@ namespace DidactEngine.Services.Contexts
                     .AddEnvironmentVariables()
                     .Build();
 
-                //var connectionString = configuration.GetConnectionString("Didact");
-
-                var connectionString = Environment.GetEnvironmentVariable("DidactConnectionString", EnvironmentVariableTarget.User);
-
-                if (string.IsNullOrWhiteSpace(connectionString))
-                {
-                    throw new ArgumentNullException("A connection string was not found for the Didact database.");
-                }
-
+                var databaseProvider = configuration.GetSection("Didact").GetValue<string>("DatabaseProvider") ?? "SQLite";
+                var sqliteDbPath = configuration.GetSection("Didact").GetValue<string>("SQLiteDbPath") ?? "Didact.db";
                 
-
-                var csBuilder = new SqlConnectionStringBuilder(connectionString)
-                {
-                    ApplicationName = "Didact",
-                    PersistSecurityInfo = true,
-                    MultipleActiveResultSets = true,
-                    WorkstationID = Environment.MachineName,
-                    TrustServerCertificate = true
-                };
-
-                var databaseProvider = configuration.GetSection("Didact").GetValue<string>("DatabaseProvider");
                 switch (databaseProvider)
                 {
                     case "SqlServer":
-                        optionsBuilder.UseSqlServer(connectionString);
+                        var connectionString = Environment.GetEnvironmentVariable("DidactConnectionString", EnvironmentVariableTarget.User);
+                        if (string.IsNullOrWhiteSpace(connectionString))
+                        {
+                            throw new ArgumentNullException("A connection string was not found for the Didact database.");
+                        }
+
+                        var csBuilder = new SqlConnectionStringBuilder(connectionString)
+                        {
+                            ApplicationName = "Didact",
+                            PersistSecurityInfo = true,
+                            MultipleActiveResultSets = true,
+                            WorkstationID = Environment.MachineName,
+                            TrustServerCertificate = true
+                        };
+                        optionsBuilder.UseSqlServer(csBuilder.ConnectionString);
                         break;
                     case "PostgreSQL":
                         //optionsBuilder.UsePostgreSQL
+                        break;
+                    case "SQLite":
                     default:
-                        optionsBuilder.UseSqlServer(csBuilder.ConnectionString);
+                        // Use SQLite with the specified or default path
+                        var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, sqliteDbPath);
+                        optionsBuilder.UseSqlite($"Data Source={dbPath}");
                         break;
                 }
             }

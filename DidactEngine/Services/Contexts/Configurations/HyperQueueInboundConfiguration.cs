@@ -11,7 +11,7 @@ namespace DidactEngine.Services.Contexts.Configurations
             entity.ToTable(nameof(HyperQueueInbound));
             entity.Property(e => e.CreatedBy).HasMaxLength(255);
             entity.Property(e => e.LastUpdatedBy).HasMaxLength(255);
-            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.Property(e => e.RowVersion).IsConcurrencyToken();
 
             entity.HasOne(d => d.Organization)
                 .WithMany(p => p.HyperQueueInbounds)

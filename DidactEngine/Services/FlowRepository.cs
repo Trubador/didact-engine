@@ -16,14 +16,22 @@ namespace DidactCore.Flows
 
         public async Task ActivateFlowByIdAsync(long flowId)
         {
-            _context.Flows.Where(f => f.FlowId == flowId).FirstOrDefault().Active = true;
-            await _context.SaveChangesAsync();
+            var flow = await _context.Flows.Where(f => f.FlowId == flowId).FirstOrDefaultAsync();
+            if (flow != null)
+            {
+                flow.Active = true;
+                await _context.SaveChangesAsync();
+            }
         }
 
         public async Task DeactivateFlowByIdAsync(long flowId)
         {
-            _context.Flows.Where(f => f.FlowId == flowId).FirstOrDefault().Active = false;
-            await _context.SaveChangesAsync();
+            var flow = await _context.Flows.Where(f => f.FlowId == flowId).FirstOrDefaultAsync();
+            if (flow != null)
+            {
+                flow.Active = false;
+                await _context.SaveChangesAsync();
+            }
         }
 
         public async Task<IEnumerable<Flow>> GetAllFlowsFromStorageAsync()
@@ -53,43 +61,49 @@ namespace DidactCore.Flows
         public async Task<Flow> GetFlowByTypeNameAsync(string flowTypeName)
         {
             var flow = await _context.Flows.Where(f => f.TypeName == flowTypeName).FirstOrDefaultAsync();
-            return flow;
-        }
+            return flow;        }
 
         public async Task SaveConfigurationsAsync(IFlowConfigurator flowConfigurator)
         {
-            // Create a new FlowConfiguration entity to save to the database
-            var flow = new Flow
+            // Check if flow already exists by TypeName to avoid duplicates
+            var existingFlow = await _context.Flows.Where(f => f.TypeName == flowConfigurator.TypeName).FirstOrDefaultAsync();
+            if (existingFlow != null)
             {
-                Name = "testflow-" + Guid.NewGuid().ToString(),
-                OrganizationId = 1,
-                //Description = flowConfigurator.Description,
-                AssemblyName = "ASM",                
-                TypeName = "type",
-                ConcurrencyLimit = 1,
-                Created = DateTime.Now,
-                CreatedBy = "Casper",
-                LastUpdated = DateTime.Now,
-                LastUpdatedBy = "Casper",
-                Active = true,
-                //RowVersion = 
-                
+                // Update existing flow with new configuration
+                existingFlow.Name = flowConfigurator.Name;
+                existingFlow.Description = flowConfigurator.Description;
+                // Note: Version, QueueType, QueueName, CronExpression are stored in related tables
+                existingFlow.LastUpdated = DateTime.Now;
+                existingFlow.LastUpdatedBy = "System";
+                existingFlow.Active = true;
+            }
+            else
+            {
+                // Create a new Flow entity using actual configurator values
+                var flow = new Flow
+                {
+                    Name = flowConfigurator.Name,
+                    Description = flowConfigurator.Description,
+                    TypeName = flowConfigurator.TypeName,
+                    // Note: Version, QueueType, QueueName, CronExpression are stored in related tables
+                    OrganizationId = 1,
+                    ExecutionModeId = 1, // Default to Auto execution mode
+                    AssemblyName = "DidactCore", // Use actual assembly name
+                    ConcurrencyLimit = 1,
+                    Created = DateTime.Now,
+                    CreatedBy = "System",
+                    LastUpdated = DateTime.Now,
+                    LastUpdatedBy = "System",
+                    Active = true,
+                    RowVersion = new byte[] { 0 } // Initialize RowVersion with a single byte for SQLite
+                };
 
-                
-                //ver = flowConfigurator.Version,
-                
-                //QueueType = flowConfigurator.QueueType,
-                //QueueName = flowConfigurator.QueueName,
-                //Delay = flowConfigurator.Delay,
-                //CronExpression = flowConfigurator.CronExpression,
-                //StartDateTime = flowConfigurator.StartDateTime,
-                //EndDateTime = flowConfigurator.EndDateTime
-            };
+                _context.Flows.Add(flow);
+            }
 
             try
             {
-                // Add the configuration to the database context and save changes
-                _context.Flows.Add(flow);
+                // Save changes to the database
                 await _context.SaveChangesAsync();
             }
             catch (Exception ex)
